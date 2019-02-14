@@ -1,0 +1,142 @@
+<link rel="stylesheet" href="https://ojpnet.ojp.usdoj.gov/sites/Smartlogic/danny/Shared%20Documents/bulma.min.css">
+
+<div id="app" class="container is-widescreen">
+    <table class="table">
+        <thead>
+            <tr>
+                <th v-for="header in computedFields" :key="header.id">{{ header }}</th>
+            </tr>
+        </thead>
+        <tfoot></tfoot>
+        <tbody>
+            <tr v-for="pokemon in pokemans" :key="pokemon.id">
+                <th v-for="(attribute, key) in pokemon" v-if="computedFields.includes(key)" v-html="attribute"></th>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<script src="https://cdn.polyfill.io/v2/polyfill.min.js"></script>
+<script src="https://ojpnet.ojp.usdoj.gov/sites/Smartlogic/danny/Shared%20Documents/vue.js"></script>
+<script src="https://ojpnet.ojp.usdoj.gov/sites/Smartlogic/danny/Shared%20Documents/chart.bundle.min.js"></script>
+
+
+<script>
+var app = new Vue({
+  el: '#app',
+  data: {
+    siteUrl: 'https://ojpnet.ojp.usdoj.gov/sites/Smartlogic/danny',
+    siteList: 'Pokemon Spreadsheet',
+    cleanFields: [],
+    dirtyFields: [],
+    removeFields: ["Per", "Total", "Ability", "Hidden Ability", "LK GK", " P2", " tk3", " ef4", " pA5", " pD6", " pe7", "EXPV"],
+    camlXml: '<View></View>',
+    pokemans: [],
+    spList: {},
+  },
+  computed: {
+    computedFields: function(){
+        return this.cleanFields.filter(field =>  !this.removeFields.includes(field));
+    }
+  },
+  methods: {
+    getFieldNames: function(){
+        var context = new SP.ClientContext(this.siteUrl);
+        var list = context.get_web().get_lists().getByTitle(this.siteList);
+        var listFields = list.getView('00000000-0000-0000-0000-000000000000').get_viewFields();
+        context.load(listFields);
+
+        context.executeQueryAsync(
+            Function.createDelegate(this, function () {
+                var fieldEnumerator = listFields.getEnumerator();
+                while (fieldEnumerator.moveNext()){
+                    let dirtyName = fieldEnumerator.get_current();
+                    let cleanName = fieldEnumerator.get_current().replace(/\_(.*?)\_/i , ' ');
+                    /* 
+                        default name of the Title field is LinkTitle,
+                        but 'LinkTitle' is not a proper field to fetch
+                        must get 'Title' explicitly
+                    */
+                    if(dirtyName == 'LinkTitle'){
+                        this.cleanFields.push( 'Title' );
+                        this.dirtyFields.push( 'Title' );
+                    }else{
+                        this.cleanFields.push( cleanName );
+                        this.dirtyFields.push( dirtyName );
+                    }
+                }
+            }), 
+            Function.createDelegate(this, function () {
+                console.log('Failed to get field names');
+            })
+        );
+    }, //end getFieldNames
+    readList: function() {
+        return new Promise( (resolve, reject) =>  {
+            let context = new SP.ClientContext(this.siteUrl);
+            let list = context.get_web().get_lists().getByTitle(this.siteList);
+            let camlQuery = new SP.CamlQuery();
+            camlQuery.set_viewXml(this.camlXml);
+
+            this.spList = list.getItems(camlQuery);
+            context.load(this.spList);
+
+            context.executeQueryAsync(
+                Function.createDelegate(this, function () {
+                    resolve('we read the list!');
+                }), 
+                Function.createDelegate(this, function () {
+                    var reason = new Error('failed to read list');
+                    reject(reason); // reject
+                })
+            ); //end executeQueryAsync
+
+        });//end Promise
+    }, //end readList
+    cleanList: function(){
+        var fieldEnumerator = this.spList.getEnumerator();
+        while (fieldEnumerator.moveNext()){
+            let currentItem = fieldEnumerator.get_current();
+            let pokemonMap = {};
+            this.cleanFields.forEach( (attr, index) => {
+                //this is where getting 'Title' works instead of 'LinkTitle'
+                    let regex = /\wiki\/(.*?)\_\(/;
+                    let attribute = fieldEnumerator.get_current().get_item(`${this.dirtyFields[index]}`);
+                    if(regex.test(attribute)){
+                        pokemonMap[attr] = regex.exec(attribute)[1] || 'n/a';
+                    } else{
+                        pokemonMap[attr] = attribute || 'n/a';
+                    }
+                        
+                }
+            );
+            //console.log(pokemonMap)
+            this.pokemans.push(pokemonMap);
+        }
+    }, //end cleanList  
+
+  }, //end methods
+  mounted: function() {
+    this.getFieldNames();
+    this.readList()
+        .then((fulfilled) => {
+            console.log(fulfilled + 'fulfilled');
+            this.cleanList();
+        })
+        .catch(function (error) {
+            console.log(error.message);
+        });
+  }
+})
+</script>
+
+<style>
+    .table{
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;       
+    }
+    .tr{
+        font-size: 8px;
+    }
+</style>
